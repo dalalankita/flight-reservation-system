@@ -114,10 +114,11 @@ Set in `application.yml`:
 ## Project layout
 ```
     controller/   HTTP layer - request/response, no business logic
-    service/      business rules, transactions, the booking/hold logic
-    repository/   Spring Data JPA interfaces
-    model/        JPA entities + enums
     dto/          request/response shapes (kept separate from entities)
+    error/        global exception handling + the shared error-response shape
+    model/        JPA entities + enum
+    repository/   Spring Data JPA interfaces
+    service/      business rules, transactions, the booking/hold logic
 ```
 
 ## Errors

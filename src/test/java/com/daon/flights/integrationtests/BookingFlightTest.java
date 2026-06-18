@@ -37,7 +37,7 @@ public class BookingFlightTest {
     BookingRepository bookingRepo;
 
     @BeforeEach
-    void clean() {                 // context is reused across tests — start each one empty
+    void clean() {
         bookingRepo.deleteAll();
         flightRepo.deleteAll();
     }
@@ -45,7 +45,7 @@ public class BookingFlightTest {
     @Test
     void concurrentBookingsNeverOversell() throws InterruptedException {
         int seats = 3;
-        int attempts = 20;         // far more bookers than seats
+        int attempts = 20;
 
         Flight flight = flightService.create(new NewFlight(
                 "EI100", "DUB", "LHR", "Dublin",
@@ -71,17 +71,16 @@ public class BookingFlightTest {
             });
         }
 
-        ready.await();             // wait until every thread is queued at the latch
-        go.countDown();            // release them all at once -> maximum contention
+        ready.await();
+        go.countDown();
         pool.shutdown();
         pool.awaitTermination(30, TimeUnit.SECONDS);
 
-        // exactly the capacity booked — never more
         assertThat(succeeded.get()).isEqualTo(seats);
 
         long taken = bookingRepo.countByFlightIdAndStatusIn(
                 flightId, List.of(BookingStatus.HELD, BookingStatus.CONFIRMED));
-        assertThat(taken).isEqualTo(seats);   // the no-oversell invariant, straight from the DB
+        assertThat(taken).isEqualTo(seats);
     }
 
     @Test

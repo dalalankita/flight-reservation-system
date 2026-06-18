@@ -39,6 +39,7 @@ public class BookingService {
 
     @Transactional
     public Booking book(Long flightId, NewBooking req) {
+        // lock this flight's row so two concurrent bookings can't both read the last seat and oversell
         Flight flight = flightService.getForUpdate(flightId);
         Instant now = clock.instant();
 
@@ -72,7 +73,8 @@ public class BookingService {
         if (b.getStatus() != BookingStatus.HELD) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Can't confirm a " + b.getStatus() + " booking");
         }
-
+        // the background sweep may not have run yet — reject an expired hold here too,
+        // so a stale hold can never be confirmed in that gap
         if (b.getHoldExpiresAt() != null && !clock.instant().isBefore(b.getHoldExpiresAt())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Hold has expired");
         }

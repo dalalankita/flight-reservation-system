@@ -78,6 +78,9 @@ public class FlightService {
         if (active > 0) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Flight has active bookings and cannot be removed");
         }
+
+        // cancelled/expired bookings still FK-reference this flight; delete them and
+        // flush so the deletes hit the DB before we remove the flight (avoids an FK violation)
         bookings.deleteByFlightId(id);
         bookings.flush();
         flights.delete(f);
@@ -91,7 +94,7 @@ public class FlightService {
                 .filter(f -> seatsAvailable(f) > 0)
                 .toList();
     }
-
+    // free seats are derived, not stored: total minus everything currently held or confirmed
     public long seatsAvailable(Flight f) {
         return f.getTotalSeats() - bookings.countByFlightIdAndStatusIn(f.getId(), TAKEN);
     }

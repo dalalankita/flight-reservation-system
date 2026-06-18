@@ -41,18 +41,40 @@ docker run -p 8080:8080 flight-reservation-system # runs it, publishing port 808
 With the service running (either option), in another terminal:
 
 ```bash
-# create a flight (2 seats)
-curl -X POST localhost:8080/admin/flights -H 'Content-Type: application/json' -d '{
-  "flightNumber":"EI123","origin":"DUB","destination":"LHR","departureCity":"Dublin",
-  "scheduledDeparture":"2030-01-01T14:30:00","departureZone":"Europe/Dublin","totalSeats":2
-}'
+# Create a flight — POST /admin/flights
+curl -X POST localhost:8080/admin/flights \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "flightNumber": "EI123",
+    "origin": "DUB",
+    "destination": "LHR",
+    "departureCity": "Dublin",
+    "scheduledDeparture": "2030-01-01T14:30:00",
+    "departureZone": "Europe/Dublin",
+    "totalSeats": 2
+  }'
 
-curl localhost:8080/flights                                   # list available flights
-curl -X POST localhost:8080/flights/1/bookings -H 'Content-Type: application/json' -d '{
-  "passengerName":"Ada","passengerEmail":"ada@example.com"
-}'                                                            # hold a seat
-curl -X POST localhost:8080/bookings/1/confirm                # confirm the hold
-curl -X DELETE localhost:8080/bookings/1                      # cancel, release the seat
+
+# List available flights — GET /flights
+curl localhost:8080/flights
+curl "localhost:8080/flights?origin=DUB&destination=LHR&date=2030-01-01"
+
+# Reserve (hold) a seat — POST /flights/{id}/bookings
+curl -X POST localhost:8080/flights/1/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "passengerName": "Ada Lovelace",
+    "passengerEmail": "ada@example.com"
+  }'
+  
+# Confirm a reservation — POST /bookings/{id}/confirm
+curl -X POST localhost:8080/bookings/1/confirm
+
+# Cancel a reservation — DELETE /bookings/{id}
+curl -X DELETE localhost:8080/bookings/1
+
+# Remove a flight — DELETE /admin/flights/{id}
+curl -X DELETE localhost:8080/admin/flights/1
 ```
 
 ### Tests

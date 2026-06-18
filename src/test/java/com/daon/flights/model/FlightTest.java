@@ -17,7 +17,7 @@ public class FlightTest {
     }
 
     @Test
-    void dublinSummerIsUtcPlusOne() {   // IST / DST
+    void dublinSummerIsUtcPlusOne() {
         assertThat(flight(LocalDateTime.parse("2026-07-01T14:30:00"), "Europe/Dublin").departureInstant())
                 .isEqualTo(Instant.parse("2026-07-01T13:30:00Z"));
     }

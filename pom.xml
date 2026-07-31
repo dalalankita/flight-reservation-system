@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.daon</groupId>
+    <groupId>com.ankita</groupId>
     <artifactId>flight-reservation-system</artifactId>
     <version>0.1.0</version>
     <name>flight-reservation</name>

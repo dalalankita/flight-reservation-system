@@ -73,7 +73,7 @@ public class BookingService {
         if (b.getStatus() != BookingStatus.HELD) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Can't confirm a " + b.getStatus() + " booking");
         }
-        // the background sweep may not have run yet — reject an expired hold here too,
+        // the background sweep may not have run yet - reject an expired hold here too,
         // so a stale hold can never be confirmed in that gap
         if (b.getHoldExpiresAt() != null && !clock.instant().isBefore(b.getHoldExpiresAt())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Hold has expired");

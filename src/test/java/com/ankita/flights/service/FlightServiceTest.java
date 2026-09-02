@@ -18,11 +18,14 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
+import com.ankita.flights.repository.FlightAvailabilityInterface;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatCode;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -86,19 +89,21 @@ public class FlightServiceTest {
     @Test
     void searchFiltersByOrigin() {
         Flight dub = flight(1L, "DUB", "JFK");
-        Flight lhr = flight(2L, "LHR", "JFK");
 
-        when(flightRepo.findAll()).thenReturn(List.of(dub, lhr));
-        when(bookingRepo.countByFlightIdAndStatusIn(anyLong(), any())).thenReturn(0L);
+        when(flightRepo.searchAvailable(eq("DUB"), isNull(), any(Instant.class)))
+                .thenReturn(List.of(view(dub, 5)));
 
-        assertThat(service().search("DUB", null, null)).containsExactly(dub);
+        var results = service().search("DUB", null, null);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).flight()).isEqualTo(dub);
     }
 
     @Test
     void seatsAvailableSubtractsTakenFromTotal() {
         Flight f = flight(1L, "DUB", "JFK");
 
-        when(bookingRepo.countByFlightIdAndStatusIn(anyLong(), any())).thenReturn(2L);
+        when(bookingRepo.countActiveSeats(anyLong(), any(Instant.class))).thenReturn(2L);
 
         assertThat(service().seatsAvailable(f)).isEqualTo(3);
     }
@@ -130,5 +135,12 @@ public class FlightServiceTest {
         when(bookingRepo.countByFlightIdAndStatusIn(anyLong(), any())).thenReturn(0L);
 
         assertThatCode(() -> service().delete(1L)).doesNotThrowAnyException();
+    }
+
+    private FlightAvailabilityInterface view(Flight f, long seats) {
+        return new FlightAvailabilityInterface() {
+            public Flight getFlight() { return f; }
+            public long getSeatsAvailable() { return seats; }
+        };
     }
 }

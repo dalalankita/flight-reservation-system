@@ -86,16 +86,17 @@ public class FlightService {
         flights.delete(f);
     }
 
-    public List<Flight> search(String origin, String destination, LocalDate date) {
-        return flights.findAll().stream()
-                .filter(f -> origin == null || f.getOrigin().equalsIgnoreCase(origin))
-                .filter(f -> destination == null || f.getDestination().equalsIgnoreCase(destination))
-                .filter(f -> date == null || f.getScheduledDeparture().toLocalDate().equals(date))
-                .filter(f -> seatsAvailable(f) > 0)
+    public List<FlightAvailability> search(String origin,
+                                           String destination, LocalDate date) {
+        return flights.searchAvailable(
+                        origin, destination, clock.instant())
+                .stream()
+                .map(v -> new FlightAvailability(v.getFlight(), v.getSeatsAvailable()))
+                .filter(fa -> date == null || fa.flight().getScheduledDeparture().toLocalDate().equals(date))
                 .toList();
     }
     // free seats are derived, not stored: total minus everything currently held or confirmed
     public long seatsAvailable(Flight f) {
-        return f.getTotalSeats() - bookings.countByFlightIdAndStatusIn(f.getId(), TAKEN);
+        return f.getTotalSeats() - bookings.countActiveSeats(f.getId(), clock.instant());
     }
 }

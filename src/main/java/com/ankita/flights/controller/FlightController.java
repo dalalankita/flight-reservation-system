@@ -29,7 +29,7 @@ public class FlightController {
 
 
         return flights.search(origin, destination, date).stream()
-                .map(f -> FlightResponse.of(f, flights.seatsAvailable(f)))
+                .map(fa -> FlightResponse.of(fa.flight(), fa.seatsAvailable()))
                 .toList();
     }
 

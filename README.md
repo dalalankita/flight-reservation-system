@@ -1,44 +1,36 @@
 # Flight Reservation
 
 A small Spring Boot service for searching flights and holding seats on them. It's Java 21
-on Spring Boot 3.3.5, backed by an in-memory H2 database - runs with no external setup
+on Spring Boot 3.3.5, backed by PostgreSQL with Flyway-managed schema migrations.
 
 ## Running
 
-There are two ways to run the service. Either way it comes up on
-http://localhost:8080. No database or other infrastructure is needed — storage is an
-in-memory H2 instance created on startup.
+The service comes up on http://localhost:8080. It needs a PostgreSQL database, which
+runs in Docker via the included `docker-compose.yml`.
 
-Option A — Maven (no Docker)
+### Prerequisites
+- JDK 21
+- Docker Desktop, installed **and running** (the engine must be up, not just the CLI)
 
-Requires JDK 21 and Maven on your machine.
+### 1. Start the database
 
-```bash
-mvn spring-boot:run
-```
+`````bash
+docker compose up -d          # starts PostgreSQL in the background
+docker compose ps             # confirm the db service is "Up"
+`````
 
-### Option B — Docker
+### 2. Run the app
 
-Requires Docker. The Dockerfile is a multi-stage build: it compiles the jar in a Maven
-image, then runs it on a slim JRE image, so you don't need a local JDK or Maven.
+`````bash
+./mvnw spring-boot:run
+`````
 
-If Docker isn't installed, get Docker Desktop (`brew install --cask docker-desktop` on a
-Mac, or download it from docker.com) and **make sure it's running** before building —
-the engine has to be up, not just the CLI installed, or the build fails with "Cannot
-connect to the Docker daemon."
-
-```bash
-docker build -t flight-reservation-system .       # builds the jar and the image
-docker run -p 8080:8080 flight-reservation-system # runs it, publishing port 8080
-```
-
-`-p 8080:8080` maps the container's port to your machine. Stop it with `Ctrl+C`, or add
-`-d` to `docker run` to run it in the background. Because storage is in-memory, every
-`docker run` starts with an empty database.
+On startup, Flyway applies the schema migrations, then the app connects and serves on
+port 8080. Data persists in Postgres across restarts.
 
 ### Smoke test
 
-With the service running (either option), in another terminal:
+With the both database and service running, in another terminal:
 
 ```bash
 # Create a flight — POST /admin/flights
@@ -80,12 +72,19 @@ curl -X DELETE localhost:8080/admin/flights/1
 ### Tests
 
 ```bash
-mvn test
+./mvnw test
 ```
+Tests run against in-memory H2 (in PostgreSQL-compatibility mode), so no database or
+Docker is needed to run them. Three tiers:
 
-Unit tests cover the service rules (booking window, capacity, hold lifecycle, zone
-handling) with an injected fixed `Clock`. An integration test (`@SpringBootTest`)
-exercises the no-oversell invariant under real concurrency.
+- **Unit tests** (`service/`, `model/`) — service rules (booking window, capacity, hold
+  lifecycle, zone handling) with mocked dependencies and an injected fixed `Clock`.
+- **Repository integration tests** (`integrationtests/repository/`, `@DataJpaTest`) —
+  the custom queries (expiry-aware seat count, the grouped availability search) against a
+  real database.
+- **Full integration tests** (`integrationtests/`, `@SpringBootTest`) — the no-oversell
+  invariant under real concurrency (20 bookings at a 3-seat flight, exactly 3 succeed),
+  and the flight-deletion rules.
 
 ## API
 
@@ -111,15 +110,28 @@ Set in `application.yml`:
 | `app.hold-minutes` | `10` | How long an unconfirmed hold survives before it can be released |
 | `app.sweep-ms` | `60000` | How often the background sweep releases expired holds |
 
+## Database & migrations
+
+- **PostgreSQL** is the datastore, run locally via `docker-compose.yml`.
+- **Flyway** owns the schema. Versioned SQL migrations live in
+  `src/main/resources/db/migration/` (`V1__init.sql`). Flyway runs them on startup and
+  records what it has applied, so the schema is reproducible and versioned rather than
+  auto-generated.
+- **Hibernate is set to `ddl-auto: validate`** — it never creates or alters tables, it
+  only checks that the entities match the Flyway-built schema, failing fast on drift.
+- **Tests use H2** in PostgreSQL-compatibility mode with `create-drop`, so they stay fast
+  and need no container.
+
 ## Project layout
-```
-    controller/   HTTP layer - request/response, no business logic
-    dto/          request/response shapes (kept separate from entities)
-    error/        global exception handling + the shared error-response shape
-    model/        JPA entities + enum
-    repository/   Spring Data JPA interfaces
-    service/      business rules, transactions, the booking/hold logic
-```
+`````
+    controller/                 HTTP layer - request/response, no business logic
+    dto/                        request/response shapes (kept separate from entities)
+    error/                      global exception handling + shared error-response shape
+    model/                      JPA entities + enum
+    repository/                 Spring Data JPA interfaces + query projection
+    service/                    business rules, transactions, booking/hold logic
+    resources/db/migration/     Flyway schema migrations (V1__init.sql)
+`````
 
 ## Errors
 
@@ -161,10 +173,12 @@ accepting bookings at 13:45 Dublin time, and it is handled by `java.time` rather
 hand.
 
 **Seat availability is calculated, never stored.**
-A flight's free seats are `totalSeats − count(bookings in HELD or CONFIRMED)`. The nice payoff is
-that cancelling or expiring a hold needs no special handling: the seat is free again simply
-because that booking no longer counts. A booking's whole life is one status moving along:
-`HELD → CONFIRMED | CANCELLED | EXPIRED`.
+A flight's free seats are `totalSeats − count(active bookings)`, where "active" means
+CONFIRMED or a HELD hold that hasn't yet expired (`holdExpiresAt > now`). Cancelling or
+expiring a hold needs no special handling — the seat is free again simply because that
+booking no longer counts. Availability and the flight search are computed in a single
+grouped SQL query, not per-flight, so listing flights is one round trip regardless of how
+many flights there are.
 
 **No oversell, via a pessimistic lock on the flight row.**
 `book()` loads the flight with `SELECT … FOR UPDATE` (`@Lock(PESSIMISTIC_WRITE)`) inside a
@@ -172,10 +186,12 @@ because that booking no longer counts. A booking's whole life is one status movi
 the second one waits for the first to finish and sees the updated count. The `concurrentBookingsNeverOversell` integration test fires 20 simultaneous bookings at a
 3-seat flight and asserts exactly 3 succeed.
 
-**Holds expire on a background sweep.**
-A new booking is `HELD` with a `holdExpiresAt` of now + `hold-minutes`. A `@Scheduled` task
-runs every `sweep-ms` and flips any `HELD` booking past its expiry to `EXPIRED`, which
-returns the seat to the pool. Simple and predictable; see Trade-offs for the cost.
+**Holds expire, and a background sweep tidies them up.**
+A new booking is `HELD` with a `holdExpiresAt` of now + `hold-minutes`. Seat availability
+ignores holds past their expiry at read time, so an expired hold frees its seat
+immediately — no waiting on the sweep. A `@Scheduled` task then runs every `sweep-ms` and
+flips lapsed `HELD` rows to `EXPIRED` so the stored status matches reality; it's
+housekeeping, not correctness.
 
 **Time goes through an injected `Clock`.**
 All time-sensitive logic reads from a `Clock` bean, so the window and hold-expiry behaviour
@@ -188,25 +204,28 @@ when converting entities to JSON, and lets the API's shape evolve independently 
 
 ## Trade-offs and limitations
 
-These are deliberate scope choices for a weekend exercise, not oversights:
+These are deliberate scope choices, not oversights:
 
-**In-memory H2.** Data resets on restart. Swapping in Postgres is a config change. The
-pessimistic-lock/no-oversell logic already leans on real database row locking,
-it carries over cleanly.
+**Pessimistic locking serializes bookings per flight.** `book()` holds a row lock on the
+flight for the length of the transaction. It's easy to reason about and obviously correct,
+but a high-throughput system might prefer optimistic locking with a retry, or a single
+atomic conditional UPDATE, to avoid holding the lock.
 
-**Hold release lags by up to one sweep interval.** Between a hold expiring and the next
-sweep, its seat still reads as taken. A read-time "ignore expired holds" check would be
-exact; the sweep was chosen for simplicity. Note this only affects the displayed availability,
-confirm() independently re-checks holdExpiresAt and rejects an expired hold even 
-before the sweep runs, so a stale hold can never be confirmed in that gap.
+**Confirm and the sweep aren't guarded against a concurrent status change.** Both move a
+HELD booking to a new status, and neither takes a row lock on the booking, so a hold
+expiring at the same instant it's confirmed could in principle lose one update. The window
+is narrow and `confirm()` independently re-checks `holdExpiresAt` (so a clearly-expired
+hold can never be confirmed), which makes a bad outcome low-risk but not impossible. A
+`@Version` column or a row lock on the booking would close it fully.
 
-**Pessimistic locking serializes bookings per flight.** Easy to reason about and obviously correct. A
-high-throughput system might prefer optimistic locking with a retry, or a single atomic
-conditional UPDATE, to avoid holding a row lock for the length of the transaction.
+**Response mapping assumes the flight is already loaded.** `BookingResponse.of` reads the
+flight off the booking (`getFlight().getId()`) after the transaction has closed. It's safe
+on the current paths because `book()` loads the flight for its capacity check, so the
+association is populated — but a future read endpoint that fetched a booking without its
+flight would hit a lazy-initialization error. A fetch-join or mapping inside the
+transaction would make it robust.
 
-**`/admin` endpoints are unauthenticated.** Out of scope here.
-
-**Search filters in memory** It loads the flights and filters them in a stream, which is
-fine at this size but belongs in the query once there's real data behind it.
+**`/admin` endpoints are unauthenticated.** Access control is out of scope here; in a real
+deployment these would sit behind authentication and an admin role.
 
 

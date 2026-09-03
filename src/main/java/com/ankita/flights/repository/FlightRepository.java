@@ -18,19 +18,19 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
     Optional<Flight> findByIdForUpdate(@Param("id") Long id);
 
     @Query("""
-            select f as flight,
-                   f.totalSeats - count(b) as seatsAvailable
-            from Flight f
-            left join Booking b
-                   on b.flight = f
-                  and (b.status = com.ankita.flights.model.BookingStatus.CONFIRMED
-                       or (b.status = com.ankita.flights.model.BookingStatus.HELD
-                           and b.holdExpiresAt > :now))
-            where (:origin      is null or lower(f.origin)      = lower(:origin))
-              and (:destination is null or lower(f.destination) = lower(:destination))
-            group by f
-            having f.totalSeats - count(b) > 0
-            """)
+        select f as flight,
+               f.totalSeats - count(b) as seatsAvailable
+        from Flight f
+        left join Booking b
+               on b.flight = f
+              and (b.status = com.ankita.flights.model.BookingStatus.CONFIRMED
+                   or (b.status = com.ankita.flights.model.BookingStatus.HELD
+                       and b.holdExpiresAt > :now))
+        where (:origin is null or lower(f.origin) = lower(cast(:origin as string)))
+          and (:destination is null or lower(f.destination) = lower(cast(:destination as string)))
+        group by f
+        having f.totalSeats - count(b) > 0
+        """)
     List<FlightAvailabilityInterface> searchAvailable(@Param("origin") String origin,
                                                       @Param("destination") String destination,
                                                       @Param("now") Instant now);
